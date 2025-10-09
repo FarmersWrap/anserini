@@ -183,8 +183,7 @@ public class ScoredDocsFuser {
       // for the current query, a list of all docids and scores, sorted by scores
       List<Map.Entry<String, Float>> sortedDocScores = docScores.get(query).entrySet().stream()
         .map(entry -> Map.entry(entry.getKey(), entry.getValue().getKey()))
-        .sorted(Map.Entry.<String, Float>comparingByValue().reversed()
-        .thenComparing(Map.Entry.comparingByKey()))
+        .sorted(Map.Entry.<String, Float>comparingByValue().reversed())
         .limit(k != null ? k : Integer.MAX_VALUE)
         .collect(Collectors.toList());
 

@@ -125,7 +125,7 @@ methods:
         - 0.9950
 """
 
-file_path = 'src/main/resources/fuse_regression/beir-v1.0.0-{key}.yaml'
+file_path = 'src/main/resources/fusion_regression/beir-v1.0.0-{key}.yaml'
 
 for key in beir_keys:
     yaml_path = file_path.format(key=key)

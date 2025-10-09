@@ -23,7 +23,9 @@ from subprocess import call, Popen, PIPE
 from ranx import Run, fuse, evaluate, Qrels
 
 # Constants
-FUSE_COMMAND = 'bin/run.sh io.anserini.fusion.FuseRuns'
+ANSERINI_FUSE_COMMAND = 'bin/run.sh io.anserini.fusion.FuseRuns'
+PYSERINI_FUSE_COMMAND = 'python -m pyserini.fusion'
+
 fusion_method_ranx = {
     "rrf": "rrf",
     "average": "sum",
@@ -58,29 +60,67 @@ def check_output(command: str) -> str:
     else:
         raise RuntimeError(f"Command {command} failed with error: {err}")
 
-def construct_fusion_commands(yaml_data: dict) -> list:
+def construct_fusion_commands(yaml_data: dict, use_pyserini: bool = False) -> list:
     """
     Constructs the fusion commands from the YAML configuration.
 
     Args:
         yaml_data (dict): The loaded YAML configuration.
+        use_pyserini (bool): If True, use Pyserini fusion; otherwise use Anserini.
 
     Returns:
         list: A list of commands to be executed.
     """
-    return [
-        [
-            FUSE_COMMAND,
-            '-runs', ' '.join(run['file'] for run in yaml_data['runs']),
-            '-output', method.get('output'),
-            '-method', method.get('name', 'average'),
-            '-k', str(method.get('k', 1000)),
-            '-depth', str(method.get('depth', 1000)),
-            '-rrf_k', str(method.get('rrf_k', 60)),
-            '-alpha', str(method.get('alpha', 0.5))
-        ]
-        for method in yaml_data['methods']
-    ]
+    commands = []
+    
+    # Filter methods to include all supported methods
+    supported_methods = ['rrf', 'average', 'interpolation']#, 'normalize']
+    filtered_methods = [method for method in yaml_data['methods'] if method.get('name') in supported_methods]
+    
+    logger.info(f"Testing fusion methods: {[method.get('name') for method in filtered_methods]}")
+    
+    for method in filtered_methods:
+        method_name = method.get('name', 'average')
+        run_files = [run['file'] for run in yaml_data['runs']]
+        output_file = method.get('output')
+        
+        if use_pyserini:
+            # Pyserini command format: python -m pyserini.fusion --method <method> --runs <files> --output <file> --runtag <tag>
+            cmd = [
+                PYSERINI_FUSE_COMMAND,
+                '--method', method_name,
+                '--runs'] + run_files + [
+                '--output', output_file,
+                '--runtag', f'pyserini.{method_name}',
+                '--k', str(method.get('k', 1000)),
+                '--depth', str(method.get('depth', 1000))
+            ]
+            
+            # Add method-specific parameters
+            if method_name == 'rrf':
+                cmd.extend(['--rrf.k', str(method.get('rrf_k', 60))])
+            elif method_name == 'interpolation':
+                cmd.extend(['--alpha', str(method.get('alpha', 0.5))])
+            elif method_name == 'normalize':
+                # Normalize method only uses depth and k parameters (no special parameters needed)
+                logger.info(f"Using Pyserini normalize method for {method_name}")
+            
+            commands.append(cmd)
+        else:
+            # Anserini command format (original)
+            cmd = [
+                ANSERINI_FUSE_COMMAND,
+                '-runs', ' '.join(run_files),
+                '-output', output_file,
+                '-method', method_name,
+                '-k', str(method.get('k', 1000)),
+                '-depth', str(method.get('depth', 1000)),
+                '-rrf_k', str(method.get('rrf_k', 60)),
+                '-alpha', str(method.get('alpha', 0.5))
+            ]
+            commands.append(cmd)
+    
+    return commands
 
 def run_fusion_commands(cmds: list):
     """
@@ -142,8 +182,12 @@ def evaluate_and_verify(yaml_data: dict, dry_run: bool):
 
     logger.info('=' * 10 + ' Verifying Fusion Results ' + '=' * 10)
 
+    # Filter methods to only include RRF and Average (ignore interpolation and normalize)
+    supported_methods = ['rrf', 'average', 'interpolation', 'normalize']
+    filtered_methods = [method for method in yaml_data['methods'] if method.get('name') in supported_methods]
+    
     results = {}
-    for method in yaml_data['methods']:
+    for method in filtered_methods:
         for i, topic_set in enumerate(yaml_data['topics']):
             for metric in yaml_data['metrics']:
                 output_runfile = str(method.get('output'))
@@ -196,9 +240,9 @@ def evaluate_and_verify(yaml_data: dict, dry_run: bool):
     # logger.info('=' * 10 + ' Verifying Fusion Results Against Ranx' + '=' * 10)
     # sanity_check = compare_with_ranx('tools/topics-and-qrels/' + yaml_data['topics'][0]['qrel'], 
     #                                 [run["file"] for run in yaml_data["runs"]], 
-    #                                 yaml_data['methods'], 
+    #                                 filtered_methods, 
     #                                 ['ndcg@10', 'recall@100', 'recall@1000'])
-    # for method in yaml_data['methods']:
+    # for method in filtered_methods:
     #     for i, topic_set in enumerate(yaml_data['topics']):
     #         for metric in yaml_data['metrics']:
     #             expected = sanity_check[method["name"]][metrics_ranx[metric["metric"]]]
@@ -215,7 +259,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run Fusion regression tests.')
     parser.add_argument('--regression', required=True, help='Name of the regression test configuration.')
     parser.add_argument('--dry-run', dest='dry_run', action='store_true',
-                        help='Output commands without actual execution.')    
+                        help='Output commands without actual execution.')
+    parser.add_argument('--use-pyserini', dest='use_pyserini', action='store_true',
+                        help='Use Pyserini fusion instead of Anserini fusion.')
     args = parser.parse_args()
 
     # Load YAML configuration
@@ -234,8 +280,12 @@ if __name__ == '__main__':
 
     start_time = time.time()
 
-    # Construct the fusion command
-    fusion_commands = construct_fusion_commands(yaml_data)
+    # Log which fusion implementation is being used
+    fusion_type = "Pyserini" if args.use_pyserini else "Anserini"
+    logger.info(f"Using {fusion_type} fusion implementation")
+
+    # Construct the fusion commands
+    fusion_commands = construct_fusion_commands(yaml_data, args.use_pyserini)
 
     # Run the fusion process
     if args.dry_run:

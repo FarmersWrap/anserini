@@ -57,6 +57,9 @@ public class FuseRuns {
   private final List<ScoredDocs> runs = new ArrayList<ScoredDocs>();
 
   public FuseRuns(Args args) throws IOException {
+    long startTime = System.currentTimeMillis();
+    long checkpointTime = startTime;
+    
     this.args = args;
     this.fuser = new RunsFuser(args);
 
@@ -69,6 +72,10 @@ public class FuseRuns {
     LOG.info("Max documents to output (k): " + args.k);
     LOG.info("Pool depth: " + args.depth);
     LOG.info("Resort TREC run files: " + args.resort);
+
+    long initTime = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Initialization: %.3f seconds", (initTime - checkpointTime) / 1000.0));
+    checkpointTime = initTime;
 
     try {
       // Ensure positive depth and k values
@@ -83,21 +90,38 @@ public class FuseRuns {
         e.getMessage()));
     }
 
-    for (String runFile : args.runs) {
+    long validationTime = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Validation: %.3f seconds", (validationTime - checkpointTime) / 1000.0));
+    checkpointTime = validationTime;
+
+    LOG.info("[TIMING] Loading run files...");
+    for (int i = 0; i < args.runs.length; i++) {
+      String runFile = args.runs[i];
       try {
+        long loadStart = System.currentTimeMillis();
         Path path = Paths.get(runFile);
         ScoredDocs run = ScoredDocsFuser.readRun(path, args.resort);
         runs.add(run);
+        long loadEnd = System.currentTimeMillis();
+        LOG.info(String.format("[TIMING] Loading run file %d/%d (%s): %.3f seconds", 
+            i + 1, args.runs.length, runFile, (loadEnd - loadStart) / 1000.0));
       } catch (Exception e) {
         throw new IllegalArgumentException(String.format("Error: %s. Please check the provided arguments. Use the \"-options\" flag to print out detailed information about available options and their usage.\n",
           e.getMessage()));
       }
     }
+    
+    long totalLoadTime = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Total run file loading: %.3f seconds", (totalLoadTime - checkpointTime) / 1000.0));
+    LOG.info(String.format("[TIMING] Total initialization time: %.3f seconds", (totalLoadTime - startTime) / 1000.0));
   }
 
   public void run() throws IOException {
     LOG.info("============ Launching Fusion ============");
+    long fusionStart = System.currentTimeMillis();
     fuser.fuse(runs);
+    long fusionEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Fusion execution: %.3f seconds", (fusionEnd - fusionStart) / 1000.0));
   }
 
   public static void main(String[] args) throws Exception {

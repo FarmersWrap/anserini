@@ -21,6 +21,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.kohsuke.args4j.Option;
 
 import io.anserini.search.ScoredDocs;
@@ -29,6 +31,7 @@ import io.anserini.search.ScoredDocs;
  * Main logic class for Fusion
  */
 public class RunsFuser {
+  private static final Logger LOG = LogManager.getLogger(RunsFuser.class);
   private final Args args;
 
   private static final String METHOD_RRF = "rrf";
@@ -72,11 +75,19 @@ public class RunsFuser {
    * @return Output ScoredDocs that combines input runs via averaging.
    */
   public static ScoredDocs average(List<ScoredDocs> runs, int depth, int k) {
+    long rescoreStart = System.currentTimeMillis();
     for (ScoredDocs run : runs) {
       ScoredDocsFuser.rescore(RescoreMethod.SCALE, 0, (1/(double)runs.size()), run);
     }
+    long rescoreEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Average rescoring: %.3f seconds", (rescoreEnd - rescoreStart) / 1000.0));
 
-    return ScoredDocsFuser.merge(runs, depth, k);
+    long mergeStart = System.currentTimeMillis();
+    ScoredDocs result = ScoredDocsFuser.merge(runs, depth, k);
+    long mergeEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Average merging: %.3f seconds", (mergeEnd - mergeStart) / 1000.0));
+    
+    return result;
   }
 
   /**
@@ -90,11 +101,19 @@ public class RunsFuser {
    * @return Output ScoredDocs that combines input runs via reciprocal rank fusion.
    */
   public static ScoredDocs reciprocalRankFusion(List<ScoredDocs> runs, int rrf_k, int depth, int k) {
+    long rescoreStart = System.currentTimeMillis();
     for (ScoredDocs run : runs) {
       ScoredDocsFuser.rescore(RescoreMethod.RRF, rrf_k, 0, run);
     }
+    long rescoreEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] RRF rescoring: %.3f seconds", (rescoreEnd - rescoreStart) / 1000.0));
 
-    return ScoredDocsFuser.merge(runs, depth, k);
+    long mergeStart = System.currentTimeMillis();
+    ScoredDocs result = ScoredDocsFuser.merge(runs, depth, k);
+    long mergeEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] RRF merging: %.3f seconds", (mergeEnd - mergeStart) / 1000.0));
+    
+    return result;
   }
 
   /**
@@ -106,9 +125,12 @@ public class RunsFuser {
    * @return Output ScoredDocs that combines input runs via reciprocal rank fusion.
    */
   public static ScoredDocs normalize(List<ScoredDocs> runs, int depth, int k) {
+    long rescoreStart = System.currentTimeMillis();
     for (ScoredDocs run : runs) {
       ScoredDocsFuser.rescore(RescoreMethod.NORMALIZE, 0, 0, run);
     }
+    long rescoreEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Normalize rescoring: %.3f seconds", (rescoreEnd - rescoreStart) / 1000.0));
 
     return average(runs, depth, k);
   }
@@ -129,10 +151,18 @@ public class RunsFuser {
       throw new IllegalArgumentException("Interpolation requires exactly 2 runs");
     }
 
+    long rescoreStart = System.currentTimeMillis();
     ScoredDocsFuser.rescore(RescoreMethod.SCALE, 0, alpha, runs.get(0));
     ScoredDocsFuser.rescore(RescoreMethod.SCALE, 0, 1 - alpha, runs.get(1));
+    long rescoreEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Interpolation rescoring: %.3f seconds", (rescoreEnd - rescoreStart) / 1000.0));
 
-    return ScoredDocsFuser.merge(runs, depth, k);
+    long mergeStart = System.currentTimeMillis();
+    ScoredDocs result = ScoredDocsFuser.merge(runs, depth, k);
+    long mergeEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Interpolation merging: %.3f seconds", (mergeEnd - mergeStart) / 1000.0));
+    
+    return result;
   }
 
   /**
@@ -142,9 +172,14 @@ public class RunsFuser {
    * @throws IOException If an I/O error occurs while saving the output.
    */
   public void fuse(List<ScoredDocs> runs) throws IOException {
+    long startTime = System.currentTimeMillis();
+    long checkpointTime = startTime;
     ScoredDocs fusedRun;
 
+    LOG.info(String.format("[TIMING] Starting %s fusion method", args.method));
+    
     // Select fusion method
+    long methodStart = System.currentTimeMillis();
     switch (args.method.toLowerCase()) {
       case METHOD_RRF:
         fusedRun = reciprocalRankFusion(runs, args.rrf_k, args.depth, args.k);
@@ -162,8 +197,18 @@ public class RunsFuser {
         throw new IllegalArgumentException("Unknown fusion method: " + args.method + 
             ". Supported methods are: average, rrf, interpolation.");
     }
+    long methodEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] %s fusion computation: %.3f seconds", 
+        args.method, (methodEnd - methodStart) / 1000.0));
+    checkpointTime = methodEnd;
 
+    LOG.info("[TIMING] Saving output...");
+    long saveStart = System.currentTimeMillis();
     Path outputPath = Paths.get(args.output);
     ScoredDocsFuser.saveToTxt(outputPath, args.runtag,  fusedRun);
+    long saveEnd = System.currentTimeMillis();
+    LOG.info(String.format("[TIMING] Saving output: %.3f seconds", (saveEnd - saveStart) / 1000.0));
+    
+    LOG.info(String.format("[TIMING] Total fusion time: %.3f seconds", (saveEnd - startTime) / 1000.0));
   }
 }

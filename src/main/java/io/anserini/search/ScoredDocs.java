@@ -50,6 +50,25 @@ public class ScoredDocs {
   public Document[] lucene_documents;
   public float[] scores;
 
+  public static ScoredDocs fromScoredDocs(ScoredDoc[] scoredDocsArray) {
+    ScoredDocs scoredDocs = new ScoredDocs();
+
+    int length = scoredDocsArray.length;
+    scoredDocs.lucene_documents = new Document[length];
+    scoredDocs.lucene_docids = new int[length];
+    scoredDocs.docids = new String[length];
+    scoredDocs.scores = new float[length];
+
+    for (int i=0; i<length; i++) {
+      scoredDocs.lucene_documents[i] = scoredDocsArray[i].lucene_document;
+      scoredDocs.lucene_docids[i] = scoredDocsArray[i].lucene_docid;
+      scoredDocs.docids[i] = scoredDocsArray[i].docid;
+      scoredDocs.scores[i] = scoredDocsArray[i].score;
+    }
+
+    return scoredDocs;
+  }
+
   public static ScoredDocs fromTopDocs(TopDocs rs, IndexSearcher searcher) {
     ScoredDocs scoredDocs = new ScoredDocs();
     scoredDocs.docids = new String[rs.scoreDocs.length];

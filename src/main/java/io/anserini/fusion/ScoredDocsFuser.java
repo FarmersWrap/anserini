@@ -40,6 +40,11 @@ import io.anserini.search.ScoredDocs;
 public class ScoredDocsFuser {
   public static final String TOPIC = "TOPIC";
 
+  public enum RescoreMethod {
+    RRF,
+    SCALE;
+  }
+
   /**
    * Reads a TREC run file and returns a ScoredDocs containing the data.
    * 
@@ -90,7 +95,7 @@ public class ScoredDocsFuser {
   /**
    * Rescored given ScoredDocs using the specified method.
    *
-   * @param method  Rescore method to be applied (e.g., RRF, SCALE, NORMALIZE).
+   * @param method  Rescore method to be applied (e.g., RRF, SCALE).
    * @param rrfK    Parameter k needed for reciprocal rank fusion.
    * @param scale   Scaling factor needed for rescoring by scaling.
    * @param scoredDocs ScoredDocs object to be rescored.
@@ -100,7 +105,6 @@ public class ScoredDocsFuser {
     switch (method) {
       case RRF -> ScoredDocsFuser.rescoreRRF(rrfK, scoredDocs);
       case SCALE -> ScoredDocsFuser.rescoreScale(scale, scoredDocs);
-      case NORMALIZE -> ScoredDocsFuser.normalizeScores(scoredDocs);
       default -> throw new UnsupportedOperationException("Unknown rescore method: " + method);
     }
   }
@@ -121,7 +125,39 @@ public class ScoredDocsFuser {
     }
   }
 
-  private static void normalizeScores(ScoredDocs scoredDocs) {
+  /**
+   * Rescore ScoredDocs using per-query scaling factors.
+   * Applies different scale values based on the query/topic ID.
+   *
+   * @param method Rescore method (currently only SCALE is supported)
+   * @param rrfK Parameter k for RRF (not used for SCALE)
+   * @param scaleMap Map from query_id to scale value
+   * @param defaultScale Default scale value for queries not in the map
+   * @param scoredDocs ScoredDocs object to be rescored
+   * @throws UnsupportedOperationException If an unsupported rescore method is provided
+   */
+  public static void rescorePerQuery(RescoreMethod method, int rrfK, Map<String, Double> scaleMap, 
+                                      double defaultScale, ScoredDocs scoredDocs) {
+    if (method != RescoreMethod.SCALE) {
+      throw new UnsupportedOperationException("Per-query rescoring currently only supports SCALE method");
+    }
+    
+    int length = scoredDocs.lucene_documents.length;
+    for (int i = 0; i < length; i++) {
+      String queryId = scoredDocs.lucene_documents[i].get(TOPIC);
+      double scale = scaleMap.getOrDefault(queryId, defaultScale);
+      float score = (float) (scoredDocs.scores[i] * scale);
+      scoredDocs.scores[i] = score;
+    }
+  }
+
+  /**
+   * Apply min-max normalization to scores in ScoredDocs.
+   * Normalizes scores per topic to the range [0, 1].
+   *
+   * @param scoredDocs ScoredDocs object to be normalized.
+   */
+  public static void normalizeScores(ScoredDocs scoredDocs) {
     Map<String, List<Integer>> indicesForTopics = new HashMap<String, List<Integer>>(); // topic, list of indices for that topic
     int length = scoredDocs.lucene_documents.length;
     for (int i = 0; i < length; i++) {
@@ -138,10 +174,18 @@ public class ScoredDocsFuser {
         maxScore = Float.max(maxScore, scoredDocs.scores[index]);
       }
 
-      for (int i = 0; i < numRecords; i++) {
-        int index = topicIndices.get(i);
-        float normalizedScore = ((float) scoredDocs.scores[index] - minScore) / (maxScore - minScore);
-        scoredDocs.scores[index] = normalizedScore;
+      // Handle edge case: when all scores are the same (max == min), assign 1.0 to all
+      if (maxScore == minScore) {
+        for (int i = 0; i < numRecords; i++) {
+          int index = topicIndices.get(i);
+          scoredDocs.scores[index] = 1.0f;
+        }
+      } else {
+        for (int i = 0; i < numRecords; i++) {
+          int index = topicIndices.get(i);
+          float normalizedScore = ((float) scoredDocs.scores[index] - minScore) / (maxScore - minScore);
+          scoredDocs.scores[index] = normalizedScore;
+        }
       }
     }
   }

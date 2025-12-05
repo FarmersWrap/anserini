@@ -71,6 +71,9 @@ public class FuseRuns {
     if (args.weights != null) {
       LOG.info("Weights: " + args.weights);
     }
+    if (args.lambdaFile != null) {
+      LOG.info("Lambda file for dynamic fusion: " + args.lambdaFile);
+    }
 
     try {
       // Ensure positive depth and k values

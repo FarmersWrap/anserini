@@ -16,13 +16,19 @@
 
 package io.anserini.fusion;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.kohsuke.args4j.Option;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.anserini.search.ScoredDocs;
 
@@ -36,6 +42,7 @@ public class RunsFuser {
   private static final String METHOD_INTERPOLATION = "interpolation";
   private static final String METHOD_AVERAGE = "average";
   private static final String METHOD_WEIGHTED = "weighted";
+  private static final String METHOD_DYNAMIC = "dynamic";
 
   public static class Args {
     @Option(name = "-output", metaVar = "[output]", required = true, usage = "Path to save the output")
@@ -64,6 +71,9 @@ public class RunsFuser {
 
     @Option(name = "-min_max_normalization", required = false, usage = "Apply min-max normalization before fusion")
     public boolean minMaxNormalization = false;
+
+    @Option(name = "-lambda_file", metaVar = "[file]", required = false, usage = "Path to JSONL file containing per-query lambda values for dynamic fusion")
+    public String lambdaFile = null;
   }
 
   public RunsFuser(Args args) {
@@ -140,6 +150,35 @@ public class RunsFuser {
   }
 
   /**
+   * Perform dynamic fusion by interpolation on a list of exactly two ScoredDocs objects.
+   * Uses per-query lambda values from a map.
+   * new_score = first_run_score * lambda + (1 - lambda) * second_run_score.
+   * For queries not in the lambda map, uses defaultLambda.
+   *
+   * @param runs List of ScoredDocs objects. Exactly two runs.
+   * @param lambdaMap Map from query_id to lambda value for per-query interpolation.
+   * @param defaultLambda Default lambda value for queries not in the map.
+   * @param depth Maximum number of results from each input run to consider.
+   * @param k Length of final results list.
+   * @return Output ScoredDocs that combines input runs via dynamic interpolation.
+   */
+  public static ScoredDocs dynamicInterpolation(List<ScoredDocs> runs, Map<String, Double> lambdaMap, 
+                                                double defaultLambda, int depth, int k) {
+    // Apply per-query scaling to first run (dense) with lambda
+    ScoredDocsFuser.rescorePerQuery(ScoredDocsFuser.RescoreMethod.SCALE, 0, lambdaMap, defaultLambda, runs.get(0));
+    
+    // Apply per-query scaling to second run (sparse) with (1 - lambda)
+    Map<String, Double> oneMinusLambdaMap = new HashMap<>();
+    for (Map.Entry<String, Double> entry : lambdaMap.entrySet()) {
+      oneMinusLambdaMap.put(entry.getKey(), 1.0 - entry.getValue());
+    }
+    double defaultOneMinusLambda = 1.0 - defaultLambda;
+    ScoredDocsFuser.rescorePerQuery(ScoredDocsFuser.RescoreMethod.SCALE, 0, oneMinusLambdaMap, defaultOneMinusLambda, runs.get(1));
+
+    return ScoredDocsFuser.merge(runs, depth, k);
+  }
+
+  /**
    * Apply min-max normalization to runs if requested.
    *
    * @param runs List of ScoredDocs objects to normalize.
@@ -172,13 +211,48 @@ public class RunsFuser {
   }
 
   /**
-   * Validate inputs and parse weights for weighted fusion method.
+   * Read and parse JSONL file containing per-query lambda values.
+   * Expected format: {"query_id": "PLAIN-1008", "lambda": 0.3, ...}
+   *
+   * @param lambdaFilePath Path to the JSONL file
+   * @param defaultLambda Default lambda value to use if query_id is not found
+   * @return Map from query_id to lambda value
+   * @throws IOException If the file cannot be read
+   */
+  private static Map<String, Double> loadLambdaMap(String lambdaFilePath, double defaultLambda) throws IOException {
+    Map<String, Double> lambdaMap = new HashMap<>();
+    ObjectMapper mapper = new ObjectMapper();
+    
+    try (BufferedReader br = new BufferedReader(new FileReader(lambdaFilePath))) {
+      String line;
+      while ((line = br.readLine()) != null) {
+        line = line.trim();
+        if (line.isEmpty()) {
+          continue;
+        }
+        try {
+          JsonNode json = mapper.readTree(line);
+          String queryId = json.get("query_id").asText();
+          double lambda = json.get("lambda").asDouble();
+          lambdaMap.put(queryId, lambda);
+        } catch (Exception e) {
+          throw new IOException("Error parsing JSON line in lambda file: " + line + ". Error: " + e.getMessage());
+        }
+      }
+    }
+    
+    return lambdaMap;
+  }
+
+  /**
+   * Validate inputs and parse weights/lambda map for fusion methods.
    *
    * @param runs List of ScoredDocs objects.
-   * @return Parsed weights list for weighted fusion, null for other methods.
+   * @return Parsed weights list for weighted fusion, lambda map for dynamic fusion, null for other methods.
    * @throws IllegalArgumentException If validation fails.
+   * @throws IOException If lambda file cannot be read.
    */
-  private List<Double> validateAndParse(List<ScoredDocs> runs) {
+  private Object validateAndParse(List<ScoredDocs> runs) throws IOException {
     switch (args.method.toLowerCase()) {
       case METHOD_RRF:
         break;
@@ -198,6 +272,15 @@ public class RunsFuser {
           throw new IllegalArgumentException("Number of runs must match number of weights");
         }
         return weights;
+      case METHOD_DYNAMIC:
+        if (runs.size() != 2) {
+          throw new IllegalArgumentException("Dynamic fusion requires exactly 2 runs");
+        }
+        if (args.lambdaFile == null || args.lambdaFile.isEmpty()) {
+          throw new IllegalArgumentException("Lambda file must be provided for dynamic fusion method");
+        }
+        Map<String, Double> lambdaMap = loadLambdaMap(args.lambdaFile, args.alpha);
+        return lambdaMap;
       default:
         return null;
     }
@@ -210,9 +293,10 @@ public class RunsFuser {
    * @param runs List of ScoredDocs objects to be fused.
    * @throws IOException If an I/O error occurs while saving the output.
    */
+  @SuppressWarnings("unchecked")
   public void fuse(List<ScoredDocs> runs) throws IOException {
-    // Validate inputs and parse weights if needed
-    List<Double> weights = validateAndParse(runs);
+    // Validate inputs and parse weights/lambda map if needed
+    Object parsedData = validateAndParse(runs);
     
     // Apply min-max normalization if requested
     normalizeRuns(runs);
@@ -231,10 +315,14 @@ public class RunsFuser {
         fusedRun = average(runs, args.depth, args.k);
         break;
       case METHOD_WEIGHTED:
-        fusedRun = weighted(runs, weights, args.depth, args.k);
+        fusedRun = weighted(runs, (List<Double>) parsedData, args.depth, args.k);
+        break;
+      case METHOD_DYNAMIC:
+        Map<String, Double> lambdaMap = (Map<String, Double>) parsedData;
+        fusedRun = dynamicInterpolation(runs, lambdaMap, args.alpha, args.depth, args.k);
         break;
       default:
-        throw new IllegalArgumentException("Unknown fusion method: " + args.method + ". Supported methods are: average, rrf, interpolation, weighted.");
+        throw new IllegalArgumentException("Unknown fusion method: " + args.method + ". Supported methods are: average, rrf, interpolation, weighted, dynamic.");
     }
 
     Path outputPath = Paths.get(args.output);

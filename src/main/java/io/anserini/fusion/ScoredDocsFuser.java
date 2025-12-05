@@ -126,6 +126,32 @@ public class ScoredDocsFuser {
   }
 
   /**
+   * Rescore ScoredDocs using per-query scaling factors.
+   * Applies different scale values based on the query/topic ID.
+   *
+   * @param method Rescore method (currently only SCALE is supported)
+   * @param rrfK Parameter k for RRF (not used for SCALE)
+   * @param scaleMap Map from query_id to scale value
+   * @param defaultScale Default scale value for queries not in the map
+   * @param scoredDocs ScoredDocs object to be rescored
+   * @throws UnsupportedOperationException If an unsupported rescore method is provided
+   */
+  public static void rescorePerQuery(RescoreMethod method, int rrfK, Map<String, Double> scaleMap, 
+                                      double defaultScale, ScoredDocs scoredDocs) {
+    if (method != RescoreMethod.SCALE) {
+      throw new UnsupportedOperationException("Per-query rescoring currently only supports SCALE method");
+    }
+    
+    int length = scoredDocs.lucene_documents.length;
+    for (int i = 0; i < length; i++) {
+      String queryId = scoredDocs.lucene_documents[i].get(TOPIC);
+      double scale = scaleMap.getOrDefault(queryId, defaultScale);
+      float score = (float) (scoredDocs.scores[i] * scale);
+      scoredDocs.scores[i] = score;
+    }
+  }
+
+  /**
    * Apply min-max normalization to scores in ScoredDocs.
    * Normalizes scores per topic to the range [0, 1].
    *

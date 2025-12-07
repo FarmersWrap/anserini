@@ -34,25 +34,32 @@ import org.junit.Test;
 import io.anserini.StdOutStdErrRedirectableLuceneTestCase;
 import io.anserini.TestUtils;
 
-public class FusionTest {
-  private final ByteArrayOutputStream err = new ByteArrayOutputStream();
-  private PrintStream save;
-
-  private void redirectStderr() {
-    save = System.err;
-    err.reset();
-    System.setErr(new PrintStream(err));
+public class FusionTest extends StdOutStdErrRedirectableLuceneTestCase {
+  @BeforeClass
+  public static void setupClass() {
+    Configurator.setLevel(FuseRuns.class.getName(), Level.ERROR);
   }
 
-  private void restoreStderr() {
-    System.setErr(save);
+  @Before
+  public void setUp() throws Exception {
+    Locale.setDefault(Locale.US);
+    redirectStdOut();
+    redirectStdErr();
+    super.setUp();
+  }
+
+  @After
+  public void tearDown() throws Exception {
+    restoreStdOut();
+    restoreStdErr();
+    super.tearDown();
   }
 
   // ========== Error Handling Tests ==========
 
   @Test
   public void testInvalidDepth() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "/fake/path",
@@ -65,12 +72,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Error: Option depth must be greater than 0. Please check the provided arguments. Use the \"-options\" flag to print out detailed information about available options and their usage.\n".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testInvalidK() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "/fake/path",
@@ -83,12 +90,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Error: Option k must be greater than 0. Please check the provided arguments. Use the \"-options\" flag to print out detailed information about available options and their usage.\n".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testInvalidRuns() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "/fake/path /fake/path2",
@@ -101,12 +108,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Error: /fake/path (No such file or directory). Please check the provided arguments. Use the \"-options\" flag to print out detailed information about available options and their usage.\n".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testInvalidMethod() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "src/test/resources/sample_runs/run1 src/test/resources/sample_runs/run2",
@@ -119,12 +126,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Unknown fusion method: add. Supported methods are: average, rrf, interpolation, weighted.".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testWeightedMissingWeights() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "src/test/resources/sample_runs/run1 src/test/resources/sample_runs/run2",
@@ -135,12 +142,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Weights must be provided for weighted fusion method".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testWeightedEmptyWeights() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "src/test/resources/sample_runs/run1 src/test/resources/sample_runs/run2",
@@ -152,12 +159,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Weights must be provided for weighted fusion method".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testWeightedCountMismatch() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "src/test/resources/sample_runs/run1 src/test/resources/sample_runs/run2",
@@ -169,12 +176,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Number of runs must match number of weights".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testWeightedInvalidWeightValue() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "src/test/resources/sample_runs/run1 src/test/resources/sample_runs/run2",
@@ -186,12 +193,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertTrue(err.toString().contains("Invalid weight value: invalid"));
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testInterpolationInvalidRunCount() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "src/test/resources/sample_runs/run1 src/test/resources/sample_runs/run2 src/test/resources/sample_runs/run3",
@@ -203,12 +210,12 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertEquals("Interpolation requires exactly 2 runs".trim(), err.toString().trim());
-    restoreStderr();
+    restoreStdErr();
   }
 
   @Test
   public void testOptions() throws Exception {
-    redirectStderr();
+    redirectStdErr();
 
     String[] fuseArgs = new String[] {
       "-runs", "/fake/path /fake/path2",
@@ -217,7 +224,7 @@ public class FusionTest {
     FuseRuns.main(fuseArgs);
 
     assertTrue(err.toString().contains("Options for FuseRuns:"));
-    restoreStderr();
+    restoreStdErr();
   }
 
   // ========== Success Tests ==========
@@ -273,29 +280,6 @@ public class FusionTest {
       "query2 Q0 doc6 5 0.015873 anserini.fusion"
     });
     assertTrue(new File("runs/fused_run_rrf_norm.test").delete());
-  }
-
-public class FusionTest extends StdOutStdErrRedirectableLuceneTestCase {
-  @BeforeClass
-  public static void setupClass() {
-    Configurator.setLevel(FuseRuns.class.getName(), Level.ERROR);
-  }
-
-  @Before
-  public void setUp() throws Exception {
-    // Explictly set locale to US so that decimal points use '.' instead of ','
-    Locale.setDefault(Locale.US);
-
-    redirectStdOut();
-    redirectStdErr();
-    super.setUp();
-  }
-
-  @After
-  public void tearDown() throws Exception {
-    restoreStdOut();
-    restoreStdErr();
-    super.tearDown();
   }
 
   @Test

@@ -68,8 +68,9 @@ def construct_fusion_commands(yaml_data: dict) -> list:
     Returns:
         list: A list of commands to be executed.
     """
-    return [
-        [
+    commands = []
+    for method in yaml_data['methods']:
+        cmd = [
             FUSE_COMMAND,
             '-runs', ' '.join(run['file'] for run in yaml_data['runs']),
             '-output', method.get('output'),
@@ -79,8 +80,11 @@ def construct_fusion_commands(yaml_data: dict) -> list:
             '-rrf_k', str(method.get('rrf_k', 60)),
             '-alpha', str(method.get('alpha', 0.5))
         ]
-        for method in yaml_data['methods']
-    ]
+        # Add min_max_normalization flag if specified
+        if method.get('min_max_normalization', False):
+            cmd.append('-min_max_normalization')
+        commands.append(cmd)
+    return commands
 
 def run_fusion_commands(cmds: list):
     """
@@ -107,15 +111,24 @@ def compare_with_ranx(qrel_file: str, runs: list[str], methods: dict, metrics: l
 
     ranx_results = {}
     for method in methods:
-        ranx_method = fusion_method_ranx[method["name"]]
+        method_name = method["name"]
+        # Map method names to ranx methods
+        if method_name in fusion_method_ranx:
+            ranx_method = fusion_method_ranx[method_name]
+        else:
+            ranx_method = "sum"  # default fallback
+        
         best_params = {}
         norm_method = None
         if ranx_method == "wsum":
             best_params['weights'] = (method.get('alpha', 0.5), 1 - method.get('alpha', 0.5))
         elif ranx_method == "rrf":
             best_params['k'] = method.get('rrf_k', 60)
-        if method["name"] == "normalize":
+        
+        # Check for min_max_normalization flag or "normalize" method name
+        if method.get('min_max_normalization', False) or method_name == "normalize":
             norm_method = "min-max"
+        
         fused = fuse(
             runs=runs,
             norm=norm_method,
@@ -123,7 +136,7 @@ def compare_with_ranx(qrel_file: str, runs: list[str], methods: dict, metrics: l
             params=best_params 
         )
         results = evaluate(qrels, fused, metrics)
-        ranx_results[method["name"]] = results
+        ranx_results[method_name] = results
 
     return ranx_results
 

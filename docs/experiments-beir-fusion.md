@@ -5,9 +5,9 @@ This page documents the results of and instructions for running fusion retrieval
 Currently, Anserini provides support for the following fusion methods:
 
 + RRF = Reciprocal Rank Fusion
-+ Average = averaging scores on a list of runs, CombSUM
-+ Interpolation = Weighted sum of two runs
-+ Normalize = average of scores normalized between [0, 1]
++ Average = averaging scores on a list of runs, CombSUM (without normalization)
++ Interpolation = Weighted sum of two runs (without normalization)
++ Average (min-max) = averaging scores after min-max normalization to [0, 1]
 
 
 ## Results 
@@ -16,14 +16,15 @@ For all experiments recorded here, the values k = 1000, depth = 1000, rrf_k = 60
 
 The runs of two models were fused: flat BM25 and flat bge-base-en-v1.5 with ONNX.
 
-Since there were only two runs fused, the average and interpolation methods produced the same results.
+Since there were only two runs fused, the average and interpolation methods produced the same results (both without min-max normalization).
+The "Average (min-max)" column shows average fusion with min-max normalization applied before score combination.
 
 Three metrics were used for evaluation: nDCG@10, R@100, and R@1000.
 
 The table below reports the effectiveness of the methods with the nDCG@10 metric and the base runs fused for reference:
 
-| Corpus                    |    RRF | Average | Interpolation | Normalize |   BM25 |    BGE |
-|---------------------------|-------:|--------:|--------------:|----------:|-------:|-------:|
+| Corpus                    |    RRF | Average | Interpolation | Average (min-max) |   BM25 |    BGE |
+|---------------------------|-------:|--------:|--------------:|------------------:|-------:|-------:|
 | `trec-covid`              | 0.8041 |  0.6567 |     0.6567    |   0.7956  | 0.5947 | 0.7815 |
 | `bioasq`                  | 0.5278 |  0.5308 |     0.5308    |   0.5428  | 0.5225 | 0.4148 |
 | `nfcorpus`                | 0.3725 |  0.3415 |     0.3415    |   0.3657  | 0.3218 | 0.3735 |
@@ -57,8 +58,8 @@ The table below reports the effectiveness of the methods with the nDCG@10 metric
 
 The table below reports the effectiveness of the methods with the R@100 metric:
 
-| Corpus                    |    RRF | Average | Interpolation | Normalize |   BM25 |    BGE |
-|---------------------------|-------:|--------:|--------------:|----------:|-------:|-------:|
+| Corpus                    |    RRF | Average | Interpolation | Average (min-max) |   BM25 |    BGE |
+|---------------------------|-------:|--------:|--------------:|------------------:|-------:|-------:|
 | `trec-covid`              | 0.1467 |  0.1255 |     0.1255    |   0.1519  | 0.1091 | 0.1406 |
 | `bioasq`                  | 0.8128 |  0.7866 |     0.7866    |   0.8143  | 0.7687 | 0.6316 |
 | `nfcorpus`                | 0.3391 |  0.3003 |     0.3003    |   0.3288  | 0.2457 | 0.3368 |
@@ -92,8 +93,8 @@ The table below reports the effectiveness of the methods with the R@100 metric:
 
 The table below reports the effectiveness of the methods with the R@1000 metric:
 
-| Corpus                    |    RRF | Average | Interpolation | Normalize |   BM25 |    BGE |
-|---------------------------|-------:|--------:|--------------:|----------:|-------:|-------:|
+| Corpus                    |    RRF | Average | Interpolation | Average (min-max) |   BM25 |    BGE |
+|---------------------------|-------:|--------:|--------------:|------------------:|-------:|-------:|
 | `trec-covid`              | 0.5029 |  0.3955 |     0.3955    |   0.5010  | 0.3955 | 0.4765 |
 | `bioasq`                  | 0.9281 |  0.9030 |     0.9030    |   0.9281  | 0.9030 | 0.8062 |
 | `nfcorpus`                | 0.6540 |  0.6422 |     0.6422    |   0.6563  | 0.3704 | 0.6622 |
@@ -157,8 +158,8 @@ do
     # interp fuse
     java -cp $ANSERINI_JAR --add-modules jdk.incubator.vector io.anserini.fusion.FuseRuns -runs $OUTPUT_DIR/run.inverted.beir-v1.0.0-${c}.flat.test.bm25 $OUTPUT_DIR/run.flat.beir-v1.0.0-${c}.bge-base-en-v1.5.test.bge-flat-onnx -output $OUTPUT_DIR/runs.fuse.interp.beir-v1.0.0-${c}.flat.bm25.bge-base-en-v1.5.bge-flat-onnx.topics.beir-v1.0.0-${c}.test.txt -method interpolation -k 1000 -depth 1000 -rrf_k 60 -alpha 0.5
 
-    # normalize fuse
-    java -cp $ANSERINI_JAR --add-modules jdk.incubator.vector io.anserini.fusion.FuseRuns -runs $OUTPUT_DIR/run.inverted.beir-v1.0.0-${c}.flat.test.bm25 $OUTPUT_DIR/run.flat.beir-v1.0.0-${c}.bge-base-en-v1.5.test.bge-flat-onnx -output $OUTPUT_DIR/runs.fuse.norm.beir-v1.0.0-${c}.flat.bm25.bge-base-en-v1.5.bge-flat-onnx.topics.beir-v1.0.0-${c}.test.txt -method normalize -k 1000 -depth 1000 -rrf_k 60 -alpha 0.5
+    # average (min-max) fuse
+    java -cp $ANSERINI_JAR --add-modules jdk.incubator.vector io.anserini.fusion.FuseRuns -runs $OUTPUT_DIR/run.inverted.beir-v1.0.0-${c}.flat.test.bm25 $OUTPUT_DIR/run.flat.beir-v1.0.0-${c}.bge-base-en-v1.5.test.bge-flat-onnx -output $OUTPUT_DIR/runs.fuse.norm.beir-v1.0.0-${c}.flat.bm25.bge-base-en-v1.5.bge-flat-onnx.topics.beir-v1.0.0-${c}.test.txt -method average -min_max_normalization -k 1000 -depth 1000 -rrf_k 60 -alpha 0.5
 done
 ```
 
@@ -189,7 +190,7 @@ do
 
     java -cp $ANSERINI_JAR trec_eval -c -m recall.1000 qrels.beir-v1.0.0-${c}.test.txt $OUTPUT_DIR/runs.fuse.interp.beir-v1.0.0-${c}.flat.bm25.bge-base-en-v1.5.bge-flat-onnx.topics.beir-v1.0.0-${c}.test.txt
 
-    echo normalize
+    echo "average (min-max)"
     java -cp $ANSERINI_JAR trec_eval -c -m ndcg_cut.10 qrels.beir-v1.0.0-${c}.test.txt $OUTPUT_DIR/runs.fuse.norm.beir-v1.0.0-${c}.flat.bm25.bge-base-en-v1.5.bge-flat-onnx.topics.beir-v1.0.0-${c}.test.txt
 
     java -cp $ANSERINI_JAR trec_eval -c -m recall.100 qrels.beir-v1.0.0-${c}.test.txt $OUTPUT_DIR/runs.fuse.norm.beir-v1.0.0-${c}.flat.bm25.bge-base-en-v1.5.bge-flat-onnx.topics.beir-v1.0.0-${c}.test.txt
